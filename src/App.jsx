@@ -19,6 +19,21 @@ const db = getFirestore(app)
 const auth = getAuth(app)
 const googleProvider = new GoogleAuthProvider()
 
+// Lista de emails autorizados
+const EMAILS_AUTORIZADOS = [
+  'a.doldan@alemaniacell.com.py',
+  'n.martinez@alemaniacell.com.py',
+  'j.bogado@alemaniacell.com.py',
+  'ma@alemaniacell.com.py',
+  'b.lird@alemaniacell.com.py',
+  'v.benitez@alemaniacell.com.py',
+  'm.pitta@alemaniacell.com.py',
+  'clm@alemaniacell.com.py',
+  'sa@alemaniacell.com.py',
+  'j.gomez@alemaniacell.com.py',
+  'r.escobar@alemaniacell.com.py',
+]
+
 function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -44,8 +59,18 @@ function App() {
   })
 
   // Verificar si usuario está autenticado
-  useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
+ useEffect(() => {
+    const unsubscribeAuth = auth.onAuthStateChanged(async (currentUser) => {
+      if (currentUser) {
+        // Verificar si el email está autorizado
+        if (!EMAILS_AUTORIZADOS.includes(currentUser.email)) {
+          alert('No tienes permiso para acceder. Contacta al administrador.')
+          await signOut(auth)
+          setUser(null)
+          setLoading(false)
+          return
+        }
+      }
       setUser(currentUser)
       setLoading(false)
     })
