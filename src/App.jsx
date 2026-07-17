@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { initializeApp } from 'firebase/app'
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query } from 'firebase/firestore'
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
 import './App.css'
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDjIhVF_SapzXcqhQcLzQWgyJJ-6_tiNs",
+  apiKey: "AIzaSyDjIhvF_SapzXcqhQcLzQWgyyJJ-6_t1Ns",
   authDomain: "acciones-app-502711.firebaseapp.com",
   projectId: "acciones-app-502711",
   storageBucket: "acciones-app-502711.firebasestorage.app",
@@ -15,11 +16,14 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 const db = getFirestore(app)
+const auth = getAuth(app)
+const googleProvider = new GoogleAuthProvider()
 
 function App() {
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [acciones, setAcciones] = useState([])
   const [tasaCambio, setTasaCambio] = useState(7000)
-  const [loading, setLoading] = useState(true)
   const [filtros, setFiltros] = useState({
     mes: '',
     marca: '',
@@ -39,7 +43,20 @@ function App() {
     soporte: '',
   })
 
+  // Verificar si usuario está autenticado
   useEffect(() => {
+    const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
+      setUser(currentUser)
+      setLoading(false)
+    })
+
+    return () => unsubscribeAuth()
+  }, [])
+
+  // Cargar acciones solo si está autenticado
+  useEffect(() => {
+    if (!user) return
+
     const q = query(collection(db, 'acciones'))
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const accionesData = snapshot.docs.map(doc => ({
@@ -51,11 +68,26 @@ function App() {
         tipoSoporte: doc.data().tipoSoporte || 'Acuerdo Comercial',
       }))
       setAcciones(accionesData)
-      setLoading(false)
     })
 
     return () => unsubscribe()
-  }, [])
+  }, [user])
+
+  const loginConGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (error) {
+      alert('Error al iniciar sesión: ' + error.message)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      await signOut(auth)
+    } catch (error) {
+      alert('Error al cerrar sesión: ' + error.message)
+    }
+  }
 
   const calcularEstadoAutomatico = (accion) => {
     const hoy = new Date()
@@ -240,12 +272,60 @@ function App() {
   const totales = calcularTotales()
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: '40px', fontSize: '16px', color: '#666' }}>Cargando datos...</div>
+    return <div style={{ textAlign: 'center', padding: '40px', fontSize: '16px', color: '#666' }}>Cargando...</div>
   }
 
+  // PANTALLA DE LOGIN
+  if (!user) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f5f5f5', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: 'white', padding: '40px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', maxWidth: '400px' }}>
+          <h1 style={{ color: '#333', marginBottom: '30px' }}>Acciones Comerciales</h1>
+          <p style={{ color: '#666', marginBottom: '30px', fontSize: '14px' }}>Iniciá sesión con tu cuenta de Google</p>
+          <button
+            onClick={loginConGoogle}
+            style={{
+              padding: '12px 24px',
+              background: '#007BFF',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              width: '100%'
+            }}
+          >
+            Iniciar sesión con Google
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // PANTALLA PRINCIPAL (solo si está autenticado)
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h1 style={{ marginBottom: '30px', color: '#333' }}>Acciones Comerciales — v2.0 (Firebase)</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+        <h1 style={{ color: '#333', margin: '0' }}>Acciones Comerciales — v2.1 (Firebase + Auth)</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <span style={{ fontSize: '14px', color: '#666' }}>👤 {user.displayName || user.email}</span>
+          <button
+            onClick={logout}
+            style={{
+              padding: '8px 16px',
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px',
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
 
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', marginBottom: '30px', border: '1px solid #ddd' }}>
         <h2 style={{ fontSize: '18px', marginBottom: '16px', color: '#333' }}>Nueva acción</h2>
