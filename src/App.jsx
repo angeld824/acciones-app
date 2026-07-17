@@ -1,9 +1,27 @@
 import { useState, useEffect } from 'react'
+import { initializeApp } from 'firebase/app'
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query } from 'firebase/firestore'
 import './App.css'
+
+// Pegá tu firebaseConfig aquí
+const firebaseConfig = {
+  apiKey: "AIzaSyDjIhVF_SapzXcqhQcLzQWgyJJ-6_tiNs",
+  authDomain: "acciones-app-502711.firebaseapp.com",
+  projectId: "acciones-app-502711",
+  storageBucket: "acciones-app-502711.firebasestorage.app",
+  messagingSenderId: "216603243034",
+  appId: "1:216603243034:web:ba1e6fb62b45aaeb4497a3",
+  measurementId: "G-GFRPF35YGL"
+};
+
+// Inicializar Firebase
+const app = initializeApp(firebaseConfig)
+const db = getFirestore(app)
 
 function App() {
   const [acciones, setAcciones] = useState([])
   const [tasaCambio, setTasaCambio] = useState(7000)
+  const [loading, setLoading] = useState(true)
   const [filtros, setFiltros] = useState({
     mes: '',
     marca: '',
@@ -23,36 +41,24 @@ function App() {
     soporte: '',
   })
 
-  // Cargar acciones de localStorage al iniciar
+  // Cargar datos de Firebase en tiempo real
   useEffect(() => {
-    const saved = localStorage.getItem('acciones')
-    if (saved) {
-      const accionesGuardadas = JSON.parse(saved)
-      const accionesConEstados = accionesGuardadas.map(a => ({
-        ...a,
-        estado: calcularEstadoAutomatico(a),
-        monto: a.monto || 0,
-        moneda: a.moneda || 'Gs',
-        tipoSoporte: a.tipoSoporte || 'Acuerdo Comercial',
+    const q = query(collection(db, 'acciones'))
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const accionesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        estado: calcularEstadoAutomatico(doc.data()),
+        monto: doc.data().monto || 0,
+        moneda: doc.data().moneda || 'Gs',
+        tipoSoporte: doc.data().tipoSoporte || 'Acuerdo Comercial',
       }))
-      setAcciones(accionesConEstados)
-    }
-    
-    const savedTasa = localStorage.getItem('tasaCambio')
-    if (savedTasa) {
-      setTasaCambio(parseFloat(savedTasa))
-    }
+      setAcciones(accionesData)
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
   }, [])
-
-  // Guardar acciones en localStorage
-  useEffect(() => {
-    localStorage.setItem('acciones', JSON.stringify(acciones))
-  }, [acciones])
-
-  // Guardar tasa de cambio
-  useEffect(() => {
-    localStorage.setItem('tasaCambio', tasaCambio.toString())
-  }, [tasaCambio])
 
   // Calcular estado automático basado en fechas
   const calcularEstadoAutomatico = (accion) => {
@@ -161,7 +167,7 @@ function App() {
     setTasaCambio(parseFloat(e.target.value) || 0)
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
 
     if (!formData.proveedor || !formData.marca || !formData.nombre || !formData.inicio || !formData.fin) {
@@ -169,38 +175,49 @@ function App() {
       return
     }
 
-    const nuevaAccion = {
-      id: Date.now(),
-      ...formData,
-      monto: parseFloat(formData.monto) || 0,
-      estado: 'nueva',
-      fechaCreacion: new Date().toLocaleDateString('es-AR'),
+    try {
+      await addDoc(collection(db, 'acciones'), {
+        ...formData,
+        monto: parseFloat(formData.monto) || 0,
+        estado: 'nueva',
+        fechaCreacion: new Date().toLocaleDateString('es-AR'),
+        createdAt: new Date(),
+      })
+
+      setFormData({
+        proveedor: '',
+        marca: '',
+        nombre: '',
+        inicio: '',
+        fin: '',
+        cierreConciliacion: '',
+        facturacion: '',
+        monto: '',
+        moneda: 'Gs',
+        tipoSoporte: 'Acuerdo Comercial',
+        soporte: '',
+      })
+    } catch (error) {
+      alert('Error al guardar: ' + error.message)
     }
-
-    setAcciones([...acciones, calcularEstadoAutomatico(nuevaAccion)])
-    setFormData({
-      proveedor: '',
-      marca: '',
-      nombre: '',
-      inicio: '',
-      fin: '',
-      cierreConciliacion: '',
-      facturacion: '',
-      monto: '',
-      moneda: 'Gs',
-      tipoSoporte: 'Acuerdo Comercial',
-      soporte: '',
-    })
   }
 
-  const cambiarEstado = (id, nuevoEstado) => {
-    setAcciones(acciones.map(accion =>
-      accion.id === id ? { ...accion, estado: nuevoEstado } : accion
-    ))
+  const cambiarEstado = async (id, nuevoEstado) => {
+    try {
+      await updateDoc(doc(db, 'acciones', id), {
+        estado: nuevoEstado
+      })
+    } catch (error) {
+      alert('Error al actualizar: ' + error.message)
+    }
   }
 
-  const eliminarAccion = (id) => {
-    setAcciones(acciones.filter(accion => accion.id !== id))
+  const eliminarAccion = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'acciones', id))
+    } catch (error) {
+      alert('Error al eliminar: ' + error.message)
+    }
   }
 
   // Obtener opciones únicas para filtros
@@ -245,9 +262,13 @@ function App() {
     }).format(valor)
   }
 
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: '40px', fontSize: '16px', color: '#666' }}>Cargando datos...</div>
+  }
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h1 style={{ marginBottom: '30px', color: '#333' }}>Acciones Comerciales — v1.0</h1>
+      <h1 style={{ marginBottom: '30px', color: '#333' }}>Acciones Comerciales — v2.0 (Firebase)</h1>
 
       {/* FORMULARIO */}
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', marginBottom: '30px', border: '1px solid #ddd' }}>
