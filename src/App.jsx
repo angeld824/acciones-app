@@ -3,6 +3,7 @@ import './App.css'
 
 function App() {
   const [acciones, setAcciones] = useState([])
+  const [tasaCambio, setTasaCambio] = useState(7000)
   const [filtros, setFiltros] = useState({
     mes: '',
     marca: '',
@@ -16,6 +17,9 @@ function App() {
     fin: '',
     cierreConciliacion: '',
     facturacion: '',
+    monto: '',
+    moneda: 'Gs',
+    tipoSoporte: 'Acuerdo Comercial',
     soporte: '',
   })
 
@@ -26,16 +30,29 @@ function App() {
       const accionesGuardadas = JSON.parse(saved)
       const accionesConEstados = accionesGuardadas.map(a => ({
         ...a,
-        estado: calcularEstadoAutomatico(a)
+        estado: calcularEstadoAutomatico(a),
+        monto: a.monto || 0,
+        moneda: a.moneda || 'Gs',
+        tipoSoporte: a.tipoSoporte || 'Acuerdo Comercial',
       }))
       setAcciones(accionesConEstados)
     }
+    
+    const savedTasa = localStorage.getItem('tasaCambio')
+    if (savedTasa) {
+      setTasaCambio(parseFloat(savedTasa))
+    }
   }, [])
 
-  // Guardar acciones en localStorage cada vez que cambien
+  // Guardar acciones en localStorage
   useEffect(() => {
     localStorage.setItem('acciones', JSON.stringify(acciones))
   }, [acciones])
+
+  // Guardar tasa de cambio
+  useEffect(() => {
+    localStorage.setItem('tasaCambio', tasaCambio.toString())
+  }, [tasaCambio])
 
   // Calcular estado automático basado en fechas
   const calcularEstadoAutomatico = (accion) => {
@@ -45,22 +62,18 @@ function App() {
     const fechaInicio = new Date(accion.inicio)
     const fechaFin = new Date(accion.fin)
 
-    // Si estado está en 'cerradaSinCobro' o 'cerradaCobrada', no cambiar automáticamente
     if (accion.estado === 'cerradaSinCobro' || accion.estado === 'cerradaCobrada') {
       return accion.estado
     }
 
-    // Si ya pasó la fecha fin, es vencida
     if (hoy > fechaFin) {
       return 'vencida'
     }
 
-    // Si hoy es >= fecha inicio, es activa
     if (hoy >= fechaInicio) {
       return 'activa'
     }
 
-    // Si aún no inició, es nueva
     return 'nueva'
   }
 
@@ -81,6 +94,53 @@ function App() {
     return dias <= 3 && accion.estado !== 'cerradaCobrada' && accion.estado !== 'cerradaSinCobro'
   }
 
+  // Convertir moneda a Gs
+  const convertirAGuarani = (monto, moneda) => {
+    if (moneda === 'USD') {
+      return monto * tasaCambio
+    }
+    return monto
+  }
+
+  // Convertir Gs a USD
+  const convertirAUSD = (montoGs) => {
+    return montoGs / tasaCambio
+  }
+
+  // Calcular totales por estado
+  const calcularTotales = () => {
+    const accionesFiltradas = acciones.filter(accion => {
+      if (filtros.mes && !accion.inicio.startsWith(filtros.mes)) return false
+      if (filtros.marca && accion.marca !== filtros.marca) return false
+      if (filtros.proveedor && accion.proveedor !== filtros.proveedor) return false
+      return true
+    })
+
+    const totales = {
+      activos: { gs: 0, usd: 0 },
+      sinCobro: { gs: 0, usd: 0 },
+      cobrados: { gs: 0, usd: 0 },
+    }
+
+    accionesFiltradas.forEach(accion => {
+      const montoGs = convertirAGuarani(accion.monto || 0, accion.moneda)
+
+      if (accion.estado === 'activa' || accion.estado === 'nueva') {
+        totales.activos.gs += montoGs
+      } else if (accion.estado === 'cerradaSinCobro' || accion.estado === 'vencida') {
+        totales.sinCobro.gs += montoGs
+      } else if (accion.estado === 'cerradaCobrada') {
+        totales.cobrados.gs += montoGs
+      }
+    })
+
+    totales.activos.usd = convertirAUSD(totales.activos.gs)
+    totales.sinCobro.usd = convertirAUSD(totales.sinCobro.gs)
+    totales.cobrados.usd = convertirAUSD(totales.cobrados.gs)
+
+    return totales
+  }
+
   const handleInputChange = (e) => {
     const { name, value } = e.target
     setFormData(prev => ({
@@ -97,6 +157,10 @@ function App() {
     }))
   }
 
+  const handleTasaChange = (e) => {
+    setTasaCambio(parseFloat(e.target.value) || 0)
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault()
 
@@ -108,6 +172,7 @@ function App() {
     const nuevaAccion = {
       id: Date.now(),
       ...formData,
+      monto: parseFloat(formData.monto) || 0,
       estado: 'nueva',
       fechaCreacion: new Date().toLocaleDateString('es-AR'),
     }
@@ -121,6 +186,9 @@ function App() {
       fin: '',
       cierreConciliacion: '',
       facturacion: '',
+      monto: '',
+      moneda: 'Gs',
+      tipoSoporte: 'Acuerdo Comercial',
       soporte: '',
     })
   }
@@ -167,9 +235,19 @@ function App() {
     { id: 'cerradaCobrada', label: 'Cerrada cobrada', color: '#D1ECF1', isUrgente: false },
   ]
 
+  const totales = calcularTotales()
+
+  const formatearMoneda = (valor, moneda) => {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: moneda === 'USD' ? 'USD' : 'ARS',
+      minimumFractionDigits: 0,
+    }).format(valor)
+  }
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h1 style={{ marginBottom: '30px', color: '#333' }}>Acciones Comerciales</h1>
+      <h1 style={{ marginBottom: '30px', color: '#333' }}>Acciones Comerciales — v1.0</h1>
 
       {/* FORMULARIO */}
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', marginBottom: '30px', border: '1px solid #ddd' }}>
@@ -250,8 +328,47 @@ function App() {
             </div>
           </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#666' }}>Monto</label>
+              <input
+                type="number"
+                name="monto"
+                placeholder="0"
+                value={formData.monto}
+                onChange={handleInputChange}
+                style={{ padding: '10px', border: '1px solid #ddd', borderRadius: '4px', width: '100%' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#666' }}>Moneda</label>
+              <select
+                name="moneda"
+                value={formData.moneda}
+                onChange={handleInputChange}
+                style={{ padding: '10px', border: '1px solid #ddd', borderRadius: '4px', width: '100%' }}
+              >
+                <option value="Gs">Guaraní (Gs)</option>
+                <option value="USD">Dólar (USD)</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#666' }}>Tipo de soporte</label>
+              <select
+                name="tipoSoporte"
+                value={formData.tipoSoporte}
+                onChange={handleInputChange}
+                style={{ padding: '10px', border: '1px solid #ddd', borderRadius: '4px', width: '100%' }}
+              >
+                <option value="Acuerdo Comercial">Acuerdo Comercial</option>
+                <option value="Soporte Comercial">Soporte Comercial</option>
+                <option value="MKT">MKT</option>
+              </select>
+            </div>
+          </div>
+
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#666' }}>Soporte</label>
+            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#666' }}>Soporte / Notas</label>
             <textarea
               name="soporte"
               placeholder="Descripción del soporte (precio, artículos, outlet, etc)"
@@ -277,6 +394,37 @@ function App() {
             Agregar acción
           </button>
         </form>
+      </div>
+
+      {/* TASA DE CAMBIO */}
+      <div style={{ background: 'white', padding: '16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #ddd', display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <label style={{ fontSize: '14px', fontWeight: '500', color: '#333' }}>Tasa de cambio (USD → Gs):</label>
+        <input
+          type="number"
+          value={tasaCambio}
+          onChange={handleTasaChange}
+          style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', width: '120px', fontSize: '14px' }}
+        />
+        <span style={{ fontSize: '12px', color: '#666' }}>1 USD = {tasaCambio.toLocaleString('es-AR')} Gs</span>
+      </div>
+
+      {/* TOTALES ACUMULADOS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '30px' }}>
+        <div style={{ background: '#D4EDDA', padding: '16px', borderRadius: '8px', border: '1px solid #c3e6cb' }}>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', textTransform: 'uppercase' }}>Total Activos</div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#155724' }}>{formatearMoneda(totales.activos.gs, 'Gs')}</div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{formatearMoneda(totales.activos.usd, 'USD')}</div>
+        </div>
+        <div style={{ background: '#E2E3E5', padding: '16px', borderRadius: '8px', border: '1px solid #d6d8db' }}>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', textTransform: 'uppercase' }}>Total Sin Cobro</div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#383d41' }}>{formatearMoneda(totales.sinCobro.gs, 'Gs')}</div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{formatearMoneda(totales.sinCobro.usd, 'USD')}</div>
+        </div>
+        <div style={{ background: '#D1ECF1', padding: '16px', borderRadius: '8px', border: '1px solid #bee5eb' }}>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', textTransform: 'uppercase' }}>Total Cobrados</div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#0c5460' }}>{formatearMoneda(totales.cobrados.gs, 'Gs')}</div>
+          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{formatearMoneda(totales.cobrados.usd, 'USD')}</div>
+        </div>
       </div>
 
       {/* FILTROS */}
@@ -390,6 +538,14 @@ function App() {
                           <span style={{ color: '#666' }}>Facturación:</span> <strong>{accion.facturacion}</strong>
                         </div>
                       )}
+                      {accion.monto && (
+                        <div>
+                          <span style={{ color: '#666' }}>Monto:</span> <strong>{accion.monto.toLocaleString('es-AR')} {accion.moneda}</strong>
+                        </div>
+                      )}
+                      <div>
+                        <span style={{ color: '#666' }}>Tipo:</span> <strong style={{ fontSize: '12px', background: '#f0f0f0', padding: '2px 6px', borderRadius: '3px' }}>{accion.tipoSoporte}</strong>
+                      </div>
                     </div>
 
                     {accion.soporte && (
